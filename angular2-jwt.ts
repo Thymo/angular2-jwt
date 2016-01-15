@@ -1,9 +1,9 @@
-import {Injectable, Injector} from 'angular2/core';
-import {Http, HTTP_PROVIDERS, Headers, BaseRequestOptions, Request, RequestOptions, RequestOptionsArgs, RequestMethod, Response} from 'angular2/http';
-import {Observable} from 'rxjs/Observable';
+import {Injectable, Injector} from 'angular2/angular2';
+import {Http, HTTP_PROVIDERS, Headers, BaseRequestOptions, Request, RequestOptions, RequestOptionsArgs, RequestMethods} from 'angular2/http';
+import {Observable} from '@reactivex/rxjs/dist/cjs/Rx';
 
 // Avoid TS error "cannot find name escape"
-declare var escape: any;
+declare var escape;
 
 export interface IAuthConfig {
   headerName: string;
@@ -18,7 +18,7 @@ export interface IAuthConfig {
  */
 
 export class AuthConfig {
-  
+
   config: any;
   headerName: string;
   headerPrefix: string;
@@ -29,7 +29,7 @@ export class AuthConfig {
   constructor(config?: any) {
     this.config = config || {};
     this.headerName = this.config.headerName || 'Authorization';
-    this.headerPrefix = this.config.headerPrefix + ' ' || 'Bearer ';
+    this.headerPrefix = this.config.headerPrefix || '';//'Bearer ';
     this.tokenName = this.config.tokenName || 'id_token';
     this.noJwtError = this.config.noJwtError || false;
     this.tokenGetter = this.config.tokenGetter || (() => localStorage.getItem(this.tokenName));
@@ -56,82 +56,74 @@ export class AuthHttp {
 
   private _config: IAuthConfig;
   public tokenStream: Observable<string>;
+  http: Http;
 
-  constructor(options: AuthConfig, private http: Http) {
-    this._config = options.getConfig();
+  constructor(config?: Object) {
+    this._config = new AuthConfig(config).getConfig();
+    var injector = Injector.resolveAndCreate([HTTP_PROVIDERS]);
+    this.http = injector.get(Http);
 
-    this.tokenStream = new Observable((obs: any) => {
+    this.tokenStream = new Observable(obs => {
       obs.next(this._config.tokenGetter())
     });
   }
 
-  _request(url: string | Request, options?: RequestOptionsArgs) : Observable<Response> {
+  request(method: RequestMethods, url: string, body?: string) {
 
-    let request:any;
-    
-    if(!tokenNotExpired(null, this._config.tokenGetter())) {
-      if(!this._config.noJwtError) {
-        throw 'Invalid JWT';
-      } else {
-        request = this.http.request(url, options);
+    if (!tokenNotExpired(null, this._config.tokenGetter())) {
+      if (this._config.noJwtError) {
+        return this.http.request(new Request({
+          method: method,
+          url: url,
+          body: body,
+          headers: null,
+          search: null,
+          merge: null
+        }));
       }
-      
-    } else if(typeof url === 'string') {
-      let reqOpts = options || {};
-      
-      if(!reqOpts.headers) {
-        reqOpts.headers = new Headers();
-      }
-      
-      reqOpts.headers.set(this._config.headerName, this._config.headerPrefix + this._config.tokenGetter());
-      request = this.http.request(url, reqOpts);
-      
-    } else {
-      let req:Request = <Request>url;
-      
-      if(!req.headers) {
-        req.headers = new Headers();
-      }
-      
-      req.headers.set(this._config.headerName, this._config.headerPrefix + this._config.tokenGetter());
-      request = this.http.request(req);
+
+      throw 'Invalid JWT';
     }
-    
-    return request;
+
+    var authHeader = new Headers();
+    authHeader.append(this._config.headerName, this._config.headerPrefix + this._config.tokenGetter());
+    return this.http.request(new Request({
+      method: method,
+      url: url,
+      body: body,
+      headers: authHeader,
+      search: null,
+      merge: null
+    }));
+
   }
 
-  private requestHelper(requestArgs: RequestOptionsArgs, additionalOptions: RequestOptionsArgs) : Observable<Response> {
-    let options = new RequestOptions(requestArgs);
-    
-    if(additionalOptions) {
-      options = options.merge(additionalOptions)
-    }
-    
-    return this._request(new Request(options))
+  get(url: string) {
+    return this.request(RequestMethods.Get, url);
   }
 
-  get(url: string, options?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, method: RequestMethod.Get }, options);
+  post(url: string, body: string) {
+    return this.request(RequestMethods.Post, url, body);
   }
 
-  post(url: string, body: string, options?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, body: body, method: RequestMethod.Post }, options);
+  put(url: string, body: string) {
+    return this.request(RequestMethods.Put, url, body);
   }
 
-  put(url: string, body: string, options ?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, body: body, method: RequestMethod.Put }, options);
+  delete(url: string, body?: string) {
+    return this.request(RequestMethods.Delete, url, body);
   }
 
-  delete(url: string, options ?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, method: RequestMethod.Delete }, options);
+  options(url: string, body?: string) {
+    return this.request(RequestMethods.Options, url, body);
   }
 
-  patch(url: string, body:string, options?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, body: body, method: RequestMethod.Patch }, options);
+  head(url: string, body?: string) {
+    return this.request(RequestMethods.Head, url, body);
   }
 
-  head(url: string, options?: RequestOptionsArgs) : Observable<Response> {
-    return this.requestHelper({ url:  url, method: RequestMethod.Head }, options);
+  patch(url: string, body: string) {
+    return this.request(RequestMethods.Patch, url, body);
   }
 
 }
@@ -142,7 +134,7 @@ export class AuthHttp {
 
 export class JwtHelper {
 
-  public urlBase64Decode(str:string) {
+  public urlBase64Decode(str: string) {
     var output = str.replace(/-/g, '+').replace(/_/g, '/');
     switch (output.length % 4) {
       case 0: { break; }
@@ -156,7 +148,7 @@ export class JwtHelper {
     return decodeURIComponent(escape(window.atob(output))); //polifyll https://github.com/davidchambers/Base64.js
   }
 
-  public decodeToken(token:string) {
+  public decodeToken(token: string) {
     var parts = token.split('.');
 
     if (parts.length !== 3) {
@@ -171,11 +163,11 @@ export class JwtHelper {
     return JSON.parse(decoded);
   }
 
-  public getTokenExpirationDate(token:string) {
+  public getTokenExpirationDate(token: string) {
     var decoded: any;
     decoded = this.decodeToken(token);
 
-    if(typeof decoded.exp === "undefined") {
+    if (typeof decoded.exp === "undefined") {
       return null;
     }
 
@@ -185,7 +177,7 @@ export class JwtHelper {
     return date;
   }
 
-  public isTokenExpired(token:string, offsetSeconds?:number) {
+  public isTokenExpired(token: string, offsetSeconds?: number) {
     var date = this.getTokenExpirationDate(token);
     offsetSeconds = offsetSeconds || 0;
     if (date === null) {
@@ -202,12 +194,14 @@ export class JwtHelper {
  * For use with the @CanActivate router decorator and NgIf
  */
 
-export function tokenNotExpired(tokenName?:string, jwt?:string) {
+export function tokenNotExpired(tokenName?: string, jwt?: string) {
+  //temp fix for my custom accessIdToken instead of JWT Token
+  return true;
 
-  var authToken:string = tokenName || 'id_token';
-  var token:string;
+  var authToken: string = tokenName || 'id_token';
+  var token: string;
 
-  if(jwt) {
+  if (jwt) {
     token = jwt;
   }
   else {
@@ -215,8 +209,8 @@ export function tokenNotExpired(tokenName?:string, jwt?:string) {
   }
 
   var jwtHelper = new JwtHelper();
-  
-  if(!token || jwtHelper.isTokenExpired(token, null)) {
+
+  if (!token || jwtHelper.isTokenExpired(token, null)) {
     return false;
   }
 
@@ -224,3 +218,4 @@ export function tokenNotExpired(tokenName?:string, jwt?:string) {
     return true;
   }
 }
+
